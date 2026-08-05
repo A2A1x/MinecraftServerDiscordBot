@@ -86,7 +86,11 @@ async def fetch_players():
     server = JavaServer(MC_HOST, MC_PORT)
     try:
         q = await server.async_query()
-        return q.players.names, q.players.online, q.players.max, False # type: ignore
+        # mcstatus>=11 exposes the roster as .list; older used .names
+        roster = getattr(q.players, "list", None)
+        if roster is None:
+            roster = q.players.names
+        return roster, q.players.online, q.players.max, False # type: ignore
     except Exception:
         s = await server.async_status()
         names = [p.name for p in (s.players.sample or [])]
