@@ -11,6 +11,24 @@ def is_server_up(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
+def is_server_live(host: str, port: int, timeout: float = 3.0) -> bool:
+    """True only if a real Minecraft server answers a status ping.
+
+    Stronger than is_server_up (a bare TCP connect). A plain TCP accept also
+    succeeds through a playit.gg tunnel edge or a lingering/half-open socket
+    while the actual server is down, so a connect-based check reports a stopped
+    server as still up and the "went down" alert never fires. A status ping
+    needs the Minecraft handshake to complete, so it flips to False the moment
+    the server really stops. Needs enable-status=true (the default).
+    """
+    from mcstatus import JavaServer
+    try:
+        JavaServer(host, port, timeout=timeout).status()
+        return True
+    except Exception:
+        return False
+
+
 def server_start_time(host: str, port: int) -> float | None:
     """Epoch start time of the local process listening on port, else None.
 

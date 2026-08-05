@@ -10,7 +10,7 @@ from monitor import (
     ServerMonitor,
     format_duration,
     format_players,
-    is_server_up,
+    is_server_live,
     server_start_time,
 )
 
@@ -45,8 +45,12 @@ monitor = ServerMonitor()
 
 
 async def check() -> bool:
-    """Reachability check off the event-loop thread (socket connect blocks)."""
-    return await asyncio.to_thread(is_server_up, MC_HOST, MC_PORT)
+    """Liveness via a Minecraft status ping, off the event-loop thread (blocks).
+
+    A ping (not a bare TCP connect) so a stopped server behind a playit.gg
+    tunnel — whose edge still accepts connections — is correctly seen as down.
+    """
+    return await asyncio.to_thread(is_server_live, MC_HOST, MC_PORT)
 
 
 @tasks.loop(seconds=POLL)
