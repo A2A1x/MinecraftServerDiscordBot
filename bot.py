@@ -40,11 +40,8 @@ MC_HOST = os.environ.get("MC_HOST", "127.0.0.1")
 MC_PORT = int(os.environ.get("MC_PORT", "25565"))
 POLL = float(os.environ.get("POLL_INTERVAL", "30"))
 GUILD_ID = os.environ.get("GUILD_ID")  # optional: instant slash-command sync
-SERVER_IP = os.environ.get("SERVER_IP", "wherein-sins.tun.ply.gg")  # address players join
-MODPACK_URL = os.environ.get(
-    "MODPACK_URL",
-    "https://cdn.discordapp.com/attachments/1516695249504964662/1534071579192066229/Chriss_Freaky_Deaky_Modpack_1.zip?ex=6a7373be&is=6a72223e&hm=c2f96216278d52855f7be142e1f70e9ee26341a0a1cac38c183ede6df9309bad&",
-)  # download link for the modpack
+SERVER_IP = os.environ.get("SERVER_IP", "")    # address players join (set in .env)
+MODPACK_URL = os.environ.get("MODPACK_URL", "")  # modpack download link (set in .env)
 LOG_PATH = os.environ.get("LOG_PATH", "")            # server latest.log -> relay chat to Discord
 RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")  # relay Discord -> game via RCON tellraw
@@ -66,7 +63,8 @@ def make_embed(title: str, color: discord.Color, description: str | None = None)
 
 
 def add_join_info(e: discord.Embed) -> discord.Embed:
-    e.add_field(name="Server IP", value=f"`{SERVER_IP}`", inline=False)
+    if SERVER_IP:
+        e.add_field(name="Server IP", value=f"`{SERVER_IP}`", inline=False)
     if MODPACK_URL:
         e.add_field(name="Modpack", value=f"[Download]({MODPACK_URL})", inline=False)
     return e
