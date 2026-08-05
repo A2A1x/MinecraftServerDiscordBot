@@ -2,11 +2,24 @@ import socket
 
 from monitor import (
     ServerMonitor,
+    bridge_line,
     format_duration,
     is_server_live,
     is_server_up,
     players_value,
 )
+
+
+def test_bridge_line():
+    chat = "[23:41:53] [Server thread/INFO]: <Notch> hello there"
+    assert bridge_line(chat) == "**Notch**: hello there"
+    joined = "[23:41:53] [Server thread/INFO]: Steve joined the game"
+    assert bridge_line(joined) == "➕ **Steve** joined"
+    left = "[23:41:53] [Server thread/INFO]: Steve left the game"
+    assert bridge_line(left) == "➖ **Steve** left"
+    # non-chat lines are ignored
+    assert bridge_line("[23:41:53] [Server thread/INFO]: Saving the game") is None
+    assert bridge_line("[23:41:53] [Worker/ERROR]: boom") is None
 
 
 def test_transitions():
@@ -72,6 +85,7 @@ if __name__ == "__main__":
     test_true_start_time()
     test_is_server_up()
     test_is_server_live_rejects_bare_socket()
+    test_bridge_line()
     test_players_value()
     test_format_duration()
     print("ok")

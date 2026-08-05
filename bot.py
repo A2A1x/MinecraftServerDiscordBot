@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import time
 
@@ -8,9 +9,11 @@ from mcstatus import JavaServer
 
 from monitor import (
     ServerMonitor,
+    bridge_line,
     format_duration,
     is_server_live,
     players_value,
+    rcon_command,
     server_start_time,
 )
 
@@ -42,8 +45,13 @@ MODPACK_URL = os.environ.get(
     "MODPACK_URL",
     "https://cdn.discordapp.com/attachments/1516695249504964662/1534071579192066229/Chriss_Freaky_Deaky_Modpack_1.zip?ex=6a7373be&is=6a72223e&hm=c2f96216278d52855f7be142e1f70e9ee26341a0a1cac38c183ede6df9309bad&",
 )  # download link for the modpack
+LOG_PATH = os.environ.get("LOG_PATH", "")            # server latest.log -> relay chat to Discord
+RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
+RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")  # relay Discord -> game via RCON tellraw
 
 intents = discord.Intents.default()
+if RCON_PASSWORD:  # reading messages to relay into the game needs the privileged intent
+    intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(bot)
 monitor = ServerMonitor()
@@ -102,6 +110,61 @@ async def _before():
     await bot.wait_until_ready()
 
 
+_log_pos = [0]
+
+
+def _read_new_lines():
+    """Lines appended to LOG_PATH since the last read (handles log rotation)."""
+    try:
+        size = os.path.getsize(LOG_PATH)
+        if size < _log_pos[0]:
+            _log_pos[0] = 0
+        with open(LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
+            f.seek(_log_pos[0])
+            data = f.read()
+            _log_pos[0] = f.tell()
+        return data.splitlines()
+    except OSError:
+        return []
+
+
+@tasks.loop(seconds=3)
+async def chat_relay():
+    """Game chat/joins/leaves -> Discord (reads the server log)."""
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel is None:
+        return
+    for line in await asyncio.to_thread(_read_new_lines):
+        msg = bridge_line(line)
+        if msg:
+            await channel.send(msg, allowed_mentions=discord.AllowedMentions.none())  # type: ignore
+
+
+@chat_relay.before_loop
+async def _cr_before():
+    await bot.wait_until_ready()
+    try:
+        _log_pos[0] = os.path.getsize(LOG_PATH)  # start at the end; don't replay history
+    except OSError:
+        _log_pos[0] = 0
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    """Discord -> game via RCON tellraw (needs the message-content intent)."""
+    if message.author.bot or message.channel.id != CHANNEL_ID or not RCON_PASSWORD:
+        return
+    content = message.clean_content.strip()
+    if not content:
+        return
+    cmd = "tellraw @a " + json.dumps(
+        {"text": f"[Discord] {message.author.display_name}: {content}"}, ensure_ascii=False)
+    try:
+        await asyncio.to_thread(rcon_command, MC_HOST, RCON_PORT, RCON_PASSWORD, cmd)
+    except Exception:
+        pass
+
+
 async def fetch_players():
     """(names, online, max, partial). Query gives the full list; status ping's
     sample is a fallback that servers may truncate (partial=True)."""
@@ -151,6 +214,8 @@ async def on_ready():
     monitor.prime(up, now, start)  # adopt current state silently, no false alert
     if not poll.is_running():
         poll.start()
+    if LOG_PATH and not chat_relay.is_running():
+        chat_relay.start()
     print(f"Logged in as {bot.user}")
 
 

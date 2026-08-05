@@ -1,5 +1,59 @@
+import re
 import socket
+import struct
 from dataclasses import dataclass
+
+
+class RconError(Exception):
+    pass
+
+
+def rcon_command(host: str, port: int, password: str, command: str, timeout: float = 5.0) -> str:
+    """Run one command over the Source RCON protocol and return the response."""
+    def recv(sock):
+        buf = b""
+        while len(buf) < 4:
+            chunk = sock.recv(4 - len(buf))
+            if not chunk:
+                raise RconError("connection closed")
+            buf += chunk
+        (length,) = struct.unpack("<i", buf)
+        data = b""
+        while len(data) < length:
+            chunk = sock.recv(length - len(data))
+            if not chunk:
+                raise RconError("connection closed")
+            data += chunk
+        req_id, ptype = struct.unpack("<ii", data[:8])
+        return req_id, ptype
+
+    def send(sock, ptype, body):
+        pkt = struct.pack("<ii", 0, ptype) + body.encode("utf-8") + b"\x00\x00"
+        sock.sendall(struct.pack("<i", len(pkt)) + pkt)
+
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        sock.settimeout(timeout)
+        send(sock, 3, password)          # auth
+        while True:
+            rid, ptype = recv(sock)
+            if ptype == 2:                # auth response
+                if rid == -1:
+                    raise RconError("authentication failed")
+                break
+        send(sock, 2, command)           # exec
+        recv(sock)
+        return ""
+
+
+def bridge_line(line: str):
+    """Turn a server log line into a Discord message, or None if not relayable."""
+    m = re.search(r"INFO\]: <([^>]{1,16})> (.+)$", line)
+    if m:
+        return f"**{m.group(1)}**: {m.group(2)}"
+    m = re.search(r"INFO\]: (\w{1,16}) (joined|left) the game\b", line)
+    if m:
+        return f"{'➕' if m.group(2) == 'joined' else '➖'} **{m.group(1)}** {m.group(2)}"
+    return None
 
 
 def is_server_up(host: str, port: int, timeout: float = 3.0) -> bool:
