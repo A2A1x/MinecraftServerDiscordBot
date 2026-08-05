@@ -1,0 +1,3 @@
+discord.py>=2.3
+psutil>=5.9  # accurate uptime: reads the server process's real start time
+mcstatus>=11  # player list via Minecraft query/status protocol
