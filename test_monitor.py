@@ -3,9 +3,9 @@ import socket
 from monitor import (
     ServerMonitor,
     format_duration,
-    format_players,
     is_server_live,
     is_server_up,
+    players_value,
 )
 
 
@@ -53,11 +53,11 @@ def test_is_server_live_rejects_bare_socket():
     assert is_server_live(host, port, timeout=1.0) is False   # nothing there: down
 
 
-def test_format_players():
-    assert format_players([], 0, 20) == "No players online (0/20)"
-    assert format_players(["Bob", "Al"], 2, 20) == "**2/20 online:** Al, Bob"
+def test_players_value():
+    assert players_value([], 0) == "None"
+    assert players_value(["Bob", "Al"], 2) == "Al, Bob"
     # status-sample fallback that only saw some of the online players
-    assert "showing 1 of 3" in format_players(["Al"], 3, 20, partial=True)
+    assert "showing 1 of 3" in players_value(["Al"], 3, partial=True)
 
 
 def test_format_duration():
@@ -72,6 +72,6 @@ if __name__ == "__main__":
     test_true_start_time()
     test_is_server_up()
     test_is_server_live_rejects_bare_socket()
-    test_format_players()
+    test_players_value()
     test_format_duration()
     print("ok")

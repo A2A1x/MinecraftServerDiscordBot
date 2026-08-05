@@ -79,13 +79,14 @@ class ServerMonitor:
         return None
 
 
-def format_players(names, online: int, maximum: int, partial: bool = False) -> str:
+def players_value(names, online: int, partial: bool = False) -> str:
+    """Body text for the players embed field."""
     if online == 0:
-        return f"No players online (0/{maximum})"
+        return "None"
     body = ", ".join(sorted(names)) if names else "(names unavailable)"
     if partial and names and len(names) < online:
-        body += f"  _(showing {len(names)} of {online})_"
-    return f"**{online}/{maximum} online:** {body}"
+        body += f"\n_showing {len(names)} of {online}_"
+    return body
 
 
 def format_duration(seconds: float) -> str:

@@ -9,8 +9,8 @@ from mcstatus import JavaServer
 from monitor import (
     ServerMonitor,
     format_duration,
-    format_players,
     is_server_live,
+    players_value,
     server_start_time,
 )
 
@@ -37,11 +37,31 @@ MC_HOST = os.environ.get("MC_HOST", "127.0.0.1")
 MC_PORT = int(os.environ.get("MC_PORT", "25565"))
 POLL = float(os.environ.get("POLL_INTERVAL", "30"))
 GUILD_ID = os.environ.get("GUILD_ID")  # optional: instant slash-command sync
+SERVER_IP = os.environ.get("SERVER_IP", "wherein-sins.tun.ply.gg")  # address players join
+MODPACK_URL = os.environ.get(
+    "MODPACK_URL",
+    "https://cdn.discordapp.com/attachments/1516695249504964662/1534071579192066229/Chriss_Freaky_Deaky_Modpack_1.zip?ex=6a7373be&is=6a72223e&hm=c2f96216278d52855f7be142e1f70e9ee26341a0a1cac38c183ede6df9309bad&",
+)  # download link for the modpack
 
 intents = discord.Intents.default()
 bot = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(bot)
 monitor = ServerMonitor()
+
+GREEN = discord.Color.brand_green()
+RED = discord.Color.brand_red()
+
+
+def make_embed(title: str, color: discord.Color, description: str | None = None) -> discord.Embed:
+    return discord.Embed(title=title, description=description, color=color,
+                         timestamp=discord.utils.utcnow())
+
+
+def add_join_info(e: discord.Embed) -> discord.Embed:
+    e.add_field(name="Server IP", value=f"`{SERVER_IP}`", inline=False)
+    if MODPACK_URL:
+        e.add_field(name="Modpack", value=f"[Download]({MODPACK_URL})", inline=False)
+    return e
 
 
 async def check() -> bool:
@@ -69,10 +89,12 @@ async def poll():
         print(f"channel {CHANNEL_ID} not found")
         return
     if event == "started":
-        await channel.send("🟢 **Minecraft server started**") # type: ignore
+        await channel.send(embed=make_embed("🟢 Minecraft server started", GREEN))  # type: ignore
     else:
-        tail = f" (was up for {format_duration(prev)})" if prev else ""
-        await channel.send(f"🔴 **Minecraft server went down**{tail}") # type: ignore
+        e = make_embed("🔴 Minecraft server went down", RED)
+        if prev:
+            e.add_field(name="Was up for", value=format_duration(prev))
+        await channel.send(embed=e)  # type: ignore
 
 
 @poll.before_loop
@@ -102,16 +124,17 @@ async def status(interaction: discord.Interaction):
     await interaction.response.defer()
     now = time.time()
     if not await check():
-        await interaction.followup.send("🔴 Offline")
+        await interaction.followup.send(embed=add_join_info(make_embed("🔴 Server Offline", RED)))
         return
     ut = monitor.uptime(now)
-    line = f"🟢 Online — up for {format_duration(ut)}" if ut else "🟢 Online"
+    e = make_embed("🟢 Server Online", GREEN)
+    e.add_field(name="Uptime", value=format_duration(ut) if ut else "unknown")
     try:
         names, online, mx, partial = await fetch_players()
-        line += "\n" + format_players(names, online, mx, partial)
+        e.add_field(name=f"Players — {online}/{mx}", value=players_value(names, online, partial), inline=False)
     except Exception:
         pass  # reachable but ping failed; still report online + uptime
-    await interaction.followup.send(line)
+    await interaction.followup.send(embed=add_join_info(e))
 
 
 @bot.event
