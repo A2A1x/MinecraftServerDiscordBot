@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import time
+import urllib.request
 
 import discord
 from discord.ext import tasks
@@ -45,6 +46,8 @@ MODPACK_URL = os.environ.get("MODPACK_URL", "")  # modpack download link (set in
 LOG_PATH = os.environ.get("LOG_PATH", "")            # server latest.log -> relay chat to Discord
 RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")  # relay Discord -> game via RCON tellraw
+OWNER_ID = os.environ.get("OWNER_ID", "")            # your Discord user ID; approves /startserver
+DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://127.0.0.1:8765")
 
 intents = discord.Intents.default()
 if RCON_PASSWORD:  # reading messages to relay into the game needs the privileged intent
@@ -196,6 +199,66 @@ async def status(interaction: discord.Interaction):
     except Exception:
         pass  # reachable but ping failed; still report online + uptime
     await interaction.followup.send(embed=add_join_info(e))
+
+
+def _dashboard_start_last() -> dict:
+    """Ask the dashboard to start the last-used server (blocking; run off-thread)."""
+    req = urllib.request.Request(
+        DASHBOARD_URL.rstrip("/") + "/api/server/start-last",
+        data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return json.loads(r.read().decode() or "{}")
+
+
+class ConfirmStart(discord.ui.View):
+    """Buttons sent to the owner's DM to approve a start request."""
+
+    def __init__(self, requester: str):
+        super().__init__(timeout=300)
+        self.requester = requester
+
+    @discord.ui.button(label="Start server", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != str(OWNER_ID):
+            await interaction.response.send_message("Only the owner can approve.", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content=f"Starting the server (requested by {self.requester})…", view=None)
+        try:
+            res = await asyncio.to_thread(_dashboard_start_last)
+        except Exception as e:
+            await interaction.followup.send(f"Couldn't reach the dashboard: {e}")
+            return
+        if res.get("error"):
+            await interaction.followup.send(f"Dashboard: {res['error']}")
+        elif res.get("already_running"):
+            await interaction.followup.send(f"ℹ️ {res.get('server','The server')} is already running.")
+        else:
+            await interaction.followup.send(f"✅ {res.get('server','Server')} is starting.")
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Start request cancelled.", view=None)
+
+
+@tree.command(description="Request that the Minecraft server be started (owner approves via DM)")
+async def startserver(interaction: discord.Interaction):
+    if not OWNER_ID:
+        await interaction.response.send_message(
+            "Start requests aren't configured (no OWNER_ID set).", ephemeral=True)
+        return
+    if await check():
+        await interaction.response.send_message("The server is already online.", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        "Sent a start request to the owner for approval. ✅", ephemeral=True)
+    try:
+        owner = await bot.fetch_user(int(OWNER_ID))
+        await owner.send(
+            f"🟢 **{interaction.user}** requested to start the Minecraft server.",
+            view=ConfirmStart(str(interaction.user)))
+    except Exception as e:
+        await interaction.followup.send(f"Couldn't DM the owner: {e}", ephemeral=True)
 
 
 @bot.event

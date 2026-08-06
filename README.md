@@ -4,6 +4,7 @@ A small Discord bot for a locally hosted Minecraft (Java) server. It:
 
 - posts an embed when the server **starts** or **goes down** (only on state changes, no spam),
 - answers **`/status`** with state, uptime, the online player list, and your join address / modpack link,
+- lets anyone **`/startserver`** to request a start, which you approve from a DM (calls the dashboard),
 - optionally runs a **two-way chat bridge** between the game and a Discord channel.
 
 ## How it works
@@ -69,6 +70,15 @@ py bot.py
 | `LOG_PATH` | — | Server `logs/latest.log` — enables game → Discord chat relay |
 | `RCON_PORT` | `25575` | RCON port for the Discord → game relay |
 | `RCON_PASSWORD` | — | RCON password — enables the bridge + Message Content intent |
+| `OWNER_ID` | — | Your Discord user ID; approves `/startserver` requests via DM |
+| `DASHBOARD_URL` | `http://127.0.0.1:8765` | Dashboard the bot calls to start the server |
+
+## `/startserver`
+
+Anyone in the channel can run `/startserver`. The bot DMs the owner (`OWNER_ID`) with
+**Start / Cancel** buttons; approving calls the dashboard's `/api/server/start-last` to launch
+the last-used server (the dashboard and bot must run on the same machine, or `DASHBOARD_URL`
+must point at it).
 
 ## Test
 
