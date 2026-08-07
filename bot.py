@@ -211,19 +211,19 @@ def _dashboard_start_last() -> dict:
 
 
 class ConfirmStart(discord.ui.View):
-    """Buttons sent to the owner's DM to approve a start request."""
+    """Owner's DM approval buttons. Persistent (timeout=None + custom_ids) so they
+    keep working after the view's 5-minute window and across bot restarts."""
 
-    def __init__(self, requester: str):
-        super().__init__(timeout=300)
-        self.requester = requester
+    def __init__(self):
+        super().__init__(timeout=None)
 
-    @discord.ui.button(label="Start server", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Start server", style=discord.ButtonStyle.success,
+                       custom_id="startserver:confirm")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if str(interaction.user.id) != str(OWNER_ID):
             await interaction.response.send_message("Only the owner can approve.", ephemeral=True)
             return
-        await interaction.response.edit_message(
-            content=f"Starting the server (requested by {self.requester})…", view=None)
+        await interaction.response.edit_message(content="Starting the server…", view=None)
         try:
             res = await asyncio.to_thread(_dashboard_start_last)
         except Exception as e:
@@ -236,7 +236,8 @@ class ConfirmStart(discord.ui.View):
         else:
             await interaction.followup.send(f"✅ {res.get('server','Server')} is starting.")
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger,
+                       custom_id="startserver:cancel")
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Start request cancelled.", view=None)
 
@@ -256,13 +257,16 @@ async def startserver(interaction: discord.Interaction):
         owner = await bot.fetch_user(int(OWNER_ID))
         await owner.send(
             f"🟢 **{interaction.user}** requested to start the Minecraft server.",
-            view=ConfirmStart(str(interaction.user)))
+            view=ConfirmStart())
     except Exception as e:
         await interaction.followup.send(f"Couldn't DM the owner: {e}", ephemeral=True)
 
 
 @bot.event
 async def on_ready():
+    if not getattr(bot, "_view_added", False):
+        bot.add_view(ConfirmStart())  # persistent: makes the buttons work after restarts
+        bot._view_added = True
     if GUILD_ID:
         guild = discord.Object(id=int(GUILD_ID))
         tree.copy_global_to(guild=guild)
