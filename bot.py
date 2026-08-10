@@ -279,7 +279,9 @@ async def on_ready():
     monitor.prime(up, now, start)  # adopt current state silently, no false alert
     if not poll.is_running():
         poll.start()
-    if LOG_PATH and not chat_relay.is_running():
+    if LOG_PATH and not os.path.exists(LOG_PATH):
+        print(f"WARNING: LOG_PATH not found, chat relay disabled: {LOG_PATH}")
+    elif LOG_PATH and not chat_relay.is_running():
         chat_relay.start()
     print(f"Logged in as {bot.user}")
 
