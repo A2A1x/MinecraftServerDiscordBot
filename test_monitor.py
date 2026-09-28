@@ -1,4 +1,7 @@
+import json
 import socket
+import urllib.error
+import urllib.request
 
 from monitor import (
     ServerMonitor,
@@ -6,6 +9,7 @@ from monitor import (
     format_duration,
     is_server_live,
     players_value,
+    public_status,
 )
 
 
@@ -62,11 +66,39 @@ def test_players_value():
     assert "showing 1 of 3" in players_value(["Al"], 3, partial=True)
 
 
+def test_public_status_allowlist():
+    d = {"name": "CFDM", "version": "1.20.1", "motd": "hi", "address": "127.0.0.1:25565",
+         "log": ["secret console"], "metrics": {"cpu": 5}, "system": {"mem_pct": 60},
+         "rcon": True, "tps": {"tps": 19.8, "mspt": 12.1, "series": [1, 2]}}
+    assert public_status(d) == {"name": "CFDM", "version": "1.20.1", "tps": 19.8,
+                                "mspt": 12.1, "motd": "hi"}
+    assert public_status({}) == {}
+
+
 def test_format_duration():
     assert format_duration(0) == "0s"
     assert format_duration(65) == "1m 5s"
     assert format_duration(3600) == "1h"
     assert format_duration(90061) == "1d 1h 1m 1s"
+
+
+def test_status_page():
+    from web import StatusPage
+    srv = socket.socket(); srv.bind(("127.0.0.1", 0)); port = srv.getsockname()[1]; srv.close()
+    page = StatusPage(port, lambda: {"online": True, "name": "CFDM"})
+    page.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        assert json.load(urllib.request.urlopen(base + "/status.json")) == {"online": True, "name": "CFDM"}
+        assert b"textContent" in urllib.request.urlopen(base + "/").read()
+        try:
+            urllib.request.urlopen(base + "/.env")
+            assert False, "expected 404"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+    finally:
+        page.stop()
+    StatusPage(0, dict).start()  # port 0 = disabled: no-op
 
 
 if __name__ == "__main__":

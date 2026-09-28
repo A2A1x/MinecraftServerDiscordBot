@@ -117,6 +117,17 @@ class ServerMonitor:
         return None
 
 
+def public_status(d: dict) -> dict:
+    """Fields from the dashboard's /api/server/status that are safe for everyone.
+    Allowlist on purpose: console log, local address, host CPU/RAM and RCON
+    state never leave the dashboard, even if the API grows new keys."""
+    tps = d.get("tps") or {}
+    out = {"name": d.get("name"), "version": d.get("version"),
+           "tps": tps.get("tps"), "mspt": tps.get("mspt"),
+           "motd": str(d["motd"])[:200] if d.get("motd") else None}
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def players_value(names, online: int, partial: bool = False) -> str:
     """Body text for the players embed field."""
     if online == 0:

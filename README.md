@@ -3,7 +3,7 @@
 A small Discord bot for a locally hosted Minecraft (Java) server. It:
 
 - posts an embed when the server **starts** or **goes down** (only on state changes, no spam),
-- answers **`/status`** with a live embed (edited every poll) showing state, uptime, the online player list, and your join address / modpack link,
+- posts a **live overview embed** when the server goes live (edited every poll, flips to offline when it stops; `/status` re-posts it) showing state, uptime, the online player list, and your join address / modpack link,
 - lets anyone **`/startserver`** to request a start, which you approve from a DM (calls the dashboard),
 - optionally runs a **two-way chat bridge** between the game and a Discord channel.
 
@@ -18,6 +18,18 @@ The player list uses the Minecraft **Query** protocol for the complete roster. I
 enabled it falls back to the status ping's sample, which servers may truncate (shown as
 "showing N of M"). For the guaranteed-complete list, set `enable-query=true` in
 `server.properties` and restart (`query.port` defaults to the server port).
+
+## Live overview & status page
+
+When the server goes live the bot posts an overview embed (name, uptime, version, TPS,
+MOTD, players, join info) and keeps editing it; its ID is saved in `status_msg.json` so a
+bot restart keeps updating the same message. Extra fields come from the dashboard's status
+API through an allowlist (`public_status` in `monitor.py`): console, local address, host
+CPU/RAM and RCON state are never shown.
+
+Set `WEB_PORT` to also serve the same data as a web page (and `/status.json`) while the
+server is up. To make it reachable from outside, expose that port (e.g. a second playit.gg
+tunnel) and set `STATUS_URL` to its public address.
 
 ## Chat bridge (optional)
 
@@ -67,6 +79,8 @@ py bot.py
 | `GUILD_ID` | — | Optional; instant slash-command sync |
 | `SERVER_IP` | — | Address players join, shown in `/status` |
 | `MODPACK_URL` | — | Modpack download link, shown in `/status` |
+| `WEB_PORT` | — | Serve a public live status page on this port while the server is up |
+| `STATUS_URL` | — | Public URL of that page, linked from the embed |
 | `LOG_PATH` | — | Server `logs/latest.log` — enables game → Discord chat relay |
 | `RCON_PORT` | `25575` | RCON port for the Discord → game relay |
 | `RCON_PASSWORD` | — | RCON password — enables the bridge + Message Content intent |

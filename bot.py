@@ -14,9 +14,11 @@ from monitor import (
     format_duration,
     is_server_live,
     players_value,
+    public_status,
     rcon_command,
     server_start_time,
 )
+from web import StatusPage
 
 
 def load_env(path=".env"):
@@ -48,6 +50,9 @@ RCON_PORT = int(os.environ.get("RCON_PORT", "25575"))
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")  # relay Discord -> game via RCON tellraw
 OWNER_ID = os.environ.get("OWNER_ID", "")            # your Discord user ID; approves /startserver
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://127.0.0.1:8765")
+WEB_PORT = int(os.environ.get("WEB_PORT") or 0)      # live status page; off when unset
+STATUS_URL = os.environ.get("STATUS_URL", "")        # public URL of that page, linked in the embed
+STATUS_MSG_FILE = "status_msg.json"                  # remembers the live embed across restarts
 
 intents = discord.Intents.default()
 if RCON_PASSWORD:  # reading messages to relay into the game needs the privileged intent
@@ -91,7 +96,9 @@ async def poll():
     if up and monitor.started_at is None:  # up-transition: get true OS start time
         start = await asyncio.to_thread(server_start_time, MC_HOST, MC_PORT)
     event = monitor.update(up, now, start)
-    await refresh_status(up)
+    _snapshot[0] = await snapshot(up)
+    if event != "started":
+        await refresh_status()  # on "stopped" this flips the live embed to offline
     if event is None:
         return
     channel = bot.get_channel(CHANNEL_ID)
@@ -99,8 +106,10 @@ async def poll():
         print(f"channel {CHANNEL_ID} not found")
         return
     if event == "started":
-        await channel.send(embed=make_embed("🟢 Minecraft server started", GREEN))  # type: ignore
+        page.start()
+        track_status(await channel.send(embed=overview_embed(_snapshot[0])))  # type: ignore
     else:
+        page.stop()
         e = make_embed("🔴 Minecraft server went down", RED)
         if prev:
             e.add_field(name="Was up for", value=format_duration(prev))
@@ -180,47 +189,100 @@ async def fetch_players():
         return names, s.players.online, s.players.max, True
 
 
-async def status_embed(up: bool) -> discord.Embed:
+def _dashboard_status() -> dict:
+    """Dashboard's /api/server/status (blocking; run off-thread). Carries private
+    data (console, host stats) — only pass it through public_fields()."""
+    with urllib.request.urlopen(DASHBOARD_URL.rstrip("/") + "/api/server/status", timeout=5) as r:
+        return json.loads(r.read().decode() or "{}")
+
+
+async def snapshot(up: bool) -> dict:
+    """Public-only server data behind both the live embed and the web page."""
+    snap = {"online": up, "updated": time.time(), "server_ip": SERVER_IP, "modpack_url": MODPACK_URL}
     if not up:
-        return add_join_info(make_embed("🔴 Server Offline", RED))
+        return snap
+    try:
+        snap.update(public_status(await asyncio.to_thread(_dashboard_status)))
+    except Exception:
+        pass  # dashboard not running; ping-only data
     ut = monitor.uptime(time.time())
-    e = make_embed("🟢 Server Online", GREEN)
-    e.add_field(name="Uptime", value=format_duration(ut) if ut else "unknown")
+    snap["uptime"] = format_duration(ut) if ut else "unknown"
     try:
         names, online, mx, partial = await fetch_players()
-        e.add_field(name=f"Players — {online}/{mx}", value=players_value(names, online, partial), inline=False)
+        snap["players"] = {"names": sorted(names), "online": online, "max": mx, "partial": partial}
     except Exception:
         pass  # reachable but ping failed; still report online + uptime
+    return snap
+
+
+def overview_embed(s: dict) -> discord.Embed:
+    if not s["online"]:
+        return add_join_info(make_embed("🔴 Server Offline", RED))
+    e = make_embed(f"🟢 {s.get('name') or 'Server'} Online", GREEN,
+                   f"[Live status page]({STATUS_URL})" if STATUS_URL else None)
+    e.add_field(name="Uptime", value=s["uptime"])
+    if s.get("version"):
+        e.add_field(name="Version", value=s["version"])
+    if s.get("tps") is not None:
+        mspt = f" ({s['mspt']} ms/tick)" if s.get("mspt") is not None else ""
+        e.add_field(name="TPS", value=f"{s['tps']}{mspt}")
+    if s.get("motd"):
+        e.add_field(name="MOTD", value=s["motd"], inline=False)
+    p = s.get("players")
+    if p:
+        e.add_field(name=f"Players — {p['online']}/{p['max']}",
+                    value=players_value(p["names"], p["online"], p["partial"]), inline=False)
     e.set_footer(text="Live — last updated")
     return add_join_info(e)
 
 
-# ponytail: one live message, in memory; a new /status takes over and a restart forgets it
+_snapshot: list[dict] = [{"online": False}]
+page = StatusPage(WEB_PORT, lambda: _snapshot[0])  # no-op when WEB_PORT unset
 _status_msg: list[discord.Message | discord.WebhookMessage | None] = [None]
 
 
-async def refresh_status(up: bool):
-    """Edit the live /status embed in place each poll."""
+def track_status(msg):
+    """Make msg the live embed and remember it so a restart keeps updating it."""
+    _status_msg[0] = msg
+    try:
+        with open(STATUS_MSG_FILE, "w") as f:
+            json.dump({"channel": msg.channel.id, "message": msg.id}, f)
+    except OSError:
+        pass
+
+
+async def load_status_msg():
+    try:
+        with open(STATUS_MSG_FILE) as f:
+            ids = json.load(f)
+        _status_msg[0] = await bot.get_channel(ids["channel"]).fetch_message(ids["message"])  # type: ignore
+    except (OSError, ValueError, KeyError, AttributeError, discord.HTTPException):
+        pass  # none saved, or the message/channel is gone
+
+
+async def refresh_status():
+    """Edit the live embed in place with the latest snapshot."""
     msg = _status_msg[0]
     if msg is None:
         return
     try:
-        await msg.edit(embed=await status_embed(up))
+        await msg.edit(embed=overview_embed(_snapshot[0]))
     except discord.HTTPException:  # deleted, or interaction webhook expired
         _status_msg[0] = None
 
 
-@tree.command(description="Post a live-updating server status embed")
+@tree.command(description="Post the live server overview here (replaces the previous one)")
 async def status(interaction: discord.Interaction):
     await interaction.response.defer()
-    msg = await interaction.followup.send(embed=await status_embed(await check()), wait=True)
+    _snapshot[0] = await snapshot(await check())
+    msg = await interaction.followup.send(embed=overview_embed(_snapshot[0]), wait=True)
     # re-fetch as a channel message: interaction webhook edits expire after 15 min
     if interaction.channel is not None:
         try:
             msg = await interaction.channel.fetch_message(msg.id)  # type: ignore
         except discord.HTTPException:
             pass
-    _status_msg[0] = msg
+    track_status(msg)
 
 
 def _dashboard_start_last() -> dict:
@@ -304,6 +366,10 @@ async def on_ready():
     up = await check()
     start = await asyncio.to_thread(server_start_time, MC_HOST, MC_PORT) if up else None
     monitor.prime(up, now, start)  # adopt current state silently, no false alert
+    _snapshot[0] = await snapshot(up)
+    if up:
+        page.start()
+    await load_status_msg()
     if not poll.is_running():
         poll.start()
     if LOG_PATH and not os.path.exists(LOG_PATH):
