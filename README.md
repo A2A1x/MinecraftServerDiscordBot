@@ -3,7 +3,7 @@
 A small Discord bot for a locally hosted Minecraft (Java) server. It:
 
 - posts an embed when the server **starts** or **goes down** (only on state changes, no spam),
-- answers **`/status`** with state, uptime, the online player list, and your join address / modpack link,
+- answers **`/status`** with a live embed (edited every poll) showing state, uptime, the online player list, and your join address / modpack link,
 - lets anyone **`/startserver`** to request a start, which you approve from a DM (calls the dashboard),
 - optionally runs a **two-way chat bridge** between the game and a Discord channel.
 

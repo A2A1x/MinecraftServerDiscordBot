@@ -91,6 +91,7 @@ async def poll():
     if up and monitor.started_at is None:  # up-transition: get true OS start time
         start = await asyncio.to_thread(server_start_time, MC_HOST, MC_PORT)
     event = monitor.update(up, now, start)
+    await refresh_status(up)
     if event is None:
         return
     channel = bot.get_channel(CHANNEL_ID)
@@ -179,14 +180,10 @@ async def fetch_players():
         return names, s.players.online, s.players.max, True
 
 
-@tree.command(description="Show server status, uptime, and online players")
-async def status(interaction: discord.Interaction):
-    await interaction.response.defer()
-    now = time.time()
-    if not await check():
-        await interaction.followup.send(embed=add_join_info(make_embed("🔴 Server Offline", RED)))
-        return
-    ut = monitor.uptime(now)
+async def status_embed(up: bool) -> discord.Embed:
+    if not up:
+        return add_join_info(make_embed("🔴 Server Offline", RED))
+    ut = monitor.uptime(time.time())
     e = make_embed("🟢 Server Online", GREEN)
     e.add_field(name="Uptime", value=format_duration(ut) if ut else "unknown")
     try:
@@ -194,7 +191,36 @@ async def status(interaction: discord.Interaction):
         e.add_field(name=f"Players — {online}/{mx}", value=players_value(names, online, partial), inline=False)
     except Exception:
         pass  # reachable but ping failed; still report online + uptime
-    await interaction.followup.send(embed=add_join_info(e))
+    e.set_footer(text="Live — last updated")
+    return add_join_info(e)
+
+
+# ponytail: one live message, in memory; a new /status takes over and a restart forgets it
+_status_msg: list[discord.Message | discord.WebhookMessage | None] = [None]
+
+
+async def refresh_status(up: bool):
+    """Edit the live /status embed in place each poll."""
+    msg = _status_msg[0]
+    if msg is None:
+        return
+    try:
+        await msg.edit(embed=await status_embed(up))
+    except discord.HTTPException:  # deleted, or interaction webhook expired
+        _status_msg[0] = None
+
+
+@tree.command(description="Post a live-updating server status embed")
+async def status(interaction: discord.Interaction):
+    await interaction.response.defer()
+    msg = await interaction.followup.send(embed=await status_embed(await check()), wait=True)
+    # re-fetch as a channel message: interaction webhook edits expire after 15 min
+    if interaction.channel is not None:
+        try:
+            msg = await interaction.channel.fetch_message(msg.id)  # type: ignore
+        except discord.HTTPException:
+            pass
+    _status_msg[0] = msg
 
 
 def _dashboard_start_last() -> dict:
