@@ -172,11 +172,7 @@ async def fetch_players():
     server = JavaServer(MC_HOST, MC_PORT)
     try:
         q = await server.async_query()
-        # mcstatus>=11 exposes the roster as .list; older used .names
-        roster = getattr(q.players, "list", None)
-        if roster is None:
-            roster = q.players.names
-        return roster, q.players.online, q.players.max, False # type: ignore
+        return q.players.list, q.players.online, q.players.max, False
     except Exception:
         s = await server.async_status()
         names = [p.name for p in (s.players.sample or [])]
@@ -262,17 +258,22 @@ async def startserver(interaction: discord.Interaction):
         await interaction.followup.send(f"Couldn't DM the owner: {e}", ephemeral=True)
 
 
-@bot.event
-async def on_ready():
-    if not getattr(bot, "_view_added", False):
-        bot.add_view(ConfirmStart())  # persistent: makes the buttons work after restarts
-        bot._view_added = True
+async def setup_hook():
+    """Runs once at login (unlike on_ready, which fires again on every reconnect)."""
+    bot.add_view(ConfirmStart())  # persistent: makes the buttons work after restarts
     if GUILD_ID:
         guild = discord.Object(id=int(GUILD_ID))
         tree.copy_global_to(guild=guild)
         await tree.sync(guild=guild)
     else:
         await tree.sync()
+
+
+bot.setup_hook = setup_hook
+
+
+@bot.event
+async def on_ready():
     now = time.time()
     up = await check()
     start = await asyncio.to_thread(server_start_time, MC_HOST, MC_PORT) if up else None

@@ -3,6 +3,9 @@ import socket
 import struct
 from dataclasses import dataclass
 
+import psutil
+from mcstatus import JavaServer
+
 
 class RconError(Exception):
     pass
@@ -11,21 +14,16 @@ class RconError(Exception):
 def rcon_command(host: str, port: int, password: str, command: str, timeout: float = 5.0) -> str:
     """Run one command over the Source RCON protocol and return the response."""
     def recv(sock):
-        buf = b""
-        while len(buf) < 4:
-            chunk = sock.recv(4 - len(buf))
-            if not chunk:
-                raise RconError("connection closed")
-            buf += chunk
-        (length,) = struct.unpack("<i", buf)
-        data = b""
-        while len(data) < length:
-            chunk = sock.recv(length - len(data))
-            if not chunk:
-                raise RconError("connection closed")
-            data += chunk
-        req_id, ptype = struct.unpack("<ii", data[:8])
-        return req_id, ptype
+        def read(n):
+            buf = b""
+            while len(buf) < n:
+                chunk = sock.recv(n - len(buf))
+                if not chunk:
+                    raise RconError("connection closed")
+                buf += chunk
+            return buf
+        (length,) = struct.unpack("<i", read(4))
+        return struct.unpack("<ii", read(length)[:8])  # (req_id, ptype)
 
     def send(sock, ptype, body):
         pkt = struct.pack("<ii", 0, ptype) + body.encode("utf-8") + b"\x00\x00"
@@ -56,26 +54,16 @@ def bridge_line(line: str):
     return None
 
 
-def is_server_up(host: str, port: int, timeout: float = 3.0) -> bool:
-    """True if a TCP connection to host:port succeeds (server accepting players)."""
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
 def is_server_live(host: str, port: int, timeout: float = 3.0) -> bool:
     """True only if a real Minecraft server answers a status ping.
 
-    Stronger than is_server_up (a bare TCP connect). A plain TCP accept also
-    succeeds through a playit.gg tunnel edge or a lingering/half-open socket
-    while the actual server is down, so a connect-based check reports a stopped
-    server as still up and the "went down" alert never fires. A status ping
-    needs the Minecraft handshake to complete, so it flips to False the moment
-    the server really stops. Needs enable-status=true (the default).
+    Stronger than a bare TCP connect. A plain TCP accept also succeeds through
+    a playit.gg tunnel edge or a lingering/half-open socket while the actual
+    server is down, so a connect-based check reports a stopped server as still
+    up and the "went down" alert never fires. A status ping needs the Minecraft
+    handshake to complete, so it flips to False the moment the server really
+    stops. Needs enable-status=true (the default).
     """
-    from mcstatus import JavaServer
     try:
         JavaServer(host, port, timeout=timeout).status()
         return True
@@ -86,15 +74,11 @@ def is_server_live(host: str, port: int, timeout: float = 3.0) -> bool:
 def server_start_time(host: str, port: int) -> float | None:
     """Epoch start time of the local process listening on port, else None.
 
-    Only works for a same-PC server; needs psutil. Returns None if psutil is
-    absent, the host isn't local, or the listener can't be identified (then the
-    caller falls back to first-seen time).
+    Only works for a same-PC server. Returns None if the host isn't local or
+    the listener can't be identified (then the caller falls back to first-seen
+    time).
     """
     if host not in ("127.0.0.1", "localhost", "::1", ""):
-        return None
-    try:
-        import psutil
-    except ImportError:
         return None
     try:
         for c in psutil.net_connections(kind="inet"):
@@ -144,17 +128,7 @@ def players_value(names, online: int, partial: bool = False) -> str:
 
 
 def format_duration(seconds: float) -> str:
-    seconds = int(seconds)
-    d, r = divmod(seconds, 86400)
+    d, r = divmod(int(seconds), 86400)
     h, r = divmod(r, 3600)
     m, s = divmod(r, 60)
-    parts = []
-    if d:
-        parts.append(f"{d}d")
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    if s or not parts:
-        parts.append(f"{s}s")
-    return " ".join(parts)
+    return " ".join(f"{v}{u}" for v, u in ((d, "d"), (h, "h"), (m, "m"), (s, "s")) if v) or "0s"

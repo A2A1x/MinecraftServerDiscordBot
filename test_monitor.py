@@ -5,7 +5,6 @@ from monitor import (
     bridge_line,
     format_duration,
     is_server_live,
-    is_server_up,
     players_value,
 )
 
@@ -43,16 +42,6 @@ def test_true_start_time():
     assert m2.uptime(1000) == 300
 
 
-def test_is_server_up():
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen()
-    host, port = srv.getsockname()
-    assert is_server_up(host, port, timeout=1.0) is True
-    srv.close()
-    assert is_server_up(host, port, timeout=1.0) is False
-
-
 def test_is_server_live_rejects_bare_socket():
     # A socket that accepts TCP but speaks no Minecraft: exactly what a playit.gg
     # tunnel edge (or a lingering socket) looks like after the server stops.
@@ -60,7 +49,7 @@ def test_is_server_live_rejects_bare_socket():
     srv.bind(("127.0.0.1", 0))
     srv.listen()
     host, port = srv.getsockname()
-    assert is_server_up(host, port, timeout=1.0) is True     # connect-based: false "up"
+    socket.create_connection((host, port), timeout=1.0).close()  # a bare connect succeeds...
     assert is_server_live(host, port, timeout=1.0) is False   # ping-based: correctly down
     srv.close()
     assert is_server_live(host, port, timeout=1.0) is False   # nothing there: down
@@ -83,7 +72,6 @@ def test_format_duration():
 if __name__ == "__main__":
     test_transitions()
     test_true_start_time()
-    test_is_server_up()
     test_is_server_live_rejects_bare_socket()
     test_bridge_line()
     test_players_value()
